@@ -995,6 +995,8 @@ static void scan_central_index(const char *fname)
 	uint64_t cd_size, cd_start_offset;
 	zip_context ctx;
 
+	memset(&ctx, 0, sizeof(zip_context));
+
 	if (!(fp = fopen(fname, "rb"))) {
 		fprintf(stderr, "! %s : %s\n", fname, strerror(errno));
 		return;
