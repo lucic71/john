@@ -13,6 +13,7 @@
 
 #include "opencl_device_info.h"
 #include "opencl_misc.h"
+#include "opencl_rotate.h"
 
 #ifndef SHA256_DIGEST_LENGTH
 #define SHA256_DIGEST_LENGTH 32
@@ -39,11 +40,24 @@
 #define Maj(x, y, z) lut3(x, y, z, 0xe8)
 #elif USE_BITSELECT
 #define Maj(x, y, z) bitselect(x, y, z ^ x)
+#elif 0 /* Wei Dai's trick, but we let the compiler cache/reuse or not */
+#define Maj(x, y, z) (y ^ ((x ^ y) & (y ^ z)))
+#elif 0 /* Explicit caching/reuse of common subexpression between rounds */
+#define Maj(x, y, z) (y ^ ((x_xor_y = x ^ y) & y_xor_z))
+#define CACHEXY uint x_xor_y, y_xor_z = S[(65 - i) % 8] ^ S[(66 - i) % 8];
+#define CACHEYZ y_xor_z = x_xor_y;
+#elif 0
+#define Maj(x, y, z) ((x & y) ^ (x & z) ^ (y & z))
 #else
 #define Maj(x, y, z) ((x & y) | (z & (x | y)))
 #endif
 
-#define ror(x, n)	rotate(x, 32U-(n))
+#ifndef CACHEXY
+#define CACHEXY
+#define CACHEYZ
+#endif
+
+#define ror ror32
 
 __constant uint h[] = {
 	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -374,6 +388,10 @@ __constant uint k[] = {
  ***************************************************************************
  */
 
+/*
+ * These macros are the same as for SHA-256 but we might end up with
+ * different ones being most effective as current GPU's aren't native 64-bit.
+ */
 #undef Maj
 #undef Ch
 
@@ -391,8 +409,21 @@ __constant uint k[] = {
 #define Maj(x, y, z) lut3_64(x, y, z, 0xe8)
 #elif USE_BITSELECT
 #define Maj(x, y, z) bitselect(x, y, z ^ x)
+#elif 0 /* Wei Dai's trick, but we let the compiler cache/reuse or not */
+#define Maj(x, y, z) (y ^ ((x ^ y) & (y ^ z)))
+#elif 0 /* Explicit caching/reuse of common subexpression between rounds */
+#define Maj(x, y, z) (y ^ ((x_xor_y = x ^ y) & y_xor_z))
+#define CACHEXY uint x_xor_y, y_xor_z = S[(65 - i) % 8] ^ S[(66 - i) % 8];
+#define CACHEYZ y_xor_z = x_xor_y;
+#elif 0
+#define Maj(x, y, z) ((x & y) ^ (x & z) ^ (y & z))
 #else
 #define Maj(x, y, z) ((x & y) | (z & (x | y)))
+#endif
+
+#ifndef CACHEXY
+#define CACHEXY
+#define CACHEYZ
 #endif
 
 __constant ulong K[] = {
@@ -424,27 +455,6 @@ __constant ulong K[] = {
 	0x431d67c49c100d4cUL, 0x4cc5d4becb3e42b6UL, 0x597f299cfc657e2aUL,
 	0x5fcb6fab3ad6faecUL, 0x6c44198c4a475817UL
 };
-
-#if gpu_amd(DEVICE_INFO) && SCALAR && defined(cl_amd_media_ops) && !__MESA__
-#pragma OPENCL EXTENSION cl_amd_media_ops : enable
-#define opt_ror64(x, n)	((n) < 32 ? \
-	 (amd_bitalign((uint)((x) >> 32), (uint)(x), (uint)(n)) | \
-	  ((ulong)amd_bitalign((uint)(x), (uint)((x) >> 32), (uint)(n)) << 32)) \
-	 : \
-	 (amd_bitalign((uint)(x), (uint)((x) >> 32), (uint)(n) - 32) | \
-	  ((ulong)amd_bitalign((uint)((x) >> 32), (uint)(x), (uint)(n) - 32) << 32)))
-#if amd_gcn(DEVICE_INFO) && DEV_VER_MAJOR < 1912
-/* Bug seen with multiples of 8 */
-#define ror64(x, n) (((n) != 8) ? opt_ror64(x, n) : rotate(x, (ulong)(64 - n)))
-#else
-#define ror64(x, n) opt_ror64(x, n)
-#endif
-#elif __OS_X__ && gpu_nvidia(DEVICE_INFO)
-/* Bug workaround for OSX nvidia 10.2.7 310.41.25f01 */
-#define ror64(x, n)       ((x >> n) | (x << (64 - n)))
-#else
-#define ror64(x, n)       rotate(x, (ulong)(64 - n))
-#endif
 
 #if 0 && SHA512_LUT3
 /* LOP3.LUT alternative - does no good */

@@ -190,6 +190,7 @@ uint64_t john_max_cands;
 static int children_ok = 1;
 
 static struct db_main database;
+static int loaded_extra_pots;
 static struct fmt_main dummy_format;
 
 static char *mode_exit_message = "";
@@ -963,6 +964,8 @@ static void load_extra_pots(struct db_main *db, void (*process_file)(struct db_m
 		struct stat s;
 		char *name = (char*)path_expand(line->data);
 
+		loaded_extra_pots = 1;
+
 		if (!stat(name, &s) && s.st_mode & S_IFREG)
 			process_file(db, name);
 #if HAVE_DIRENT_H && HAVE_SYS_TYPES_H
@@ -1221,8 +1224,6 @@ static void john_load(void)
 			    database.format->params.algorithm_name);
 		}
 
-		total = database.password_count;
-
 		ldr_load_pot_file(&database, options.activepot);
 
 /*
@@ -1231,10 +1232,19 @@ static void john_load(void)
  */
 		load_extra_pots(&database, &ldr_load_pot_file);
 
-		ldr_fix_database(&database);
+		total = ldr_fix_database(&database);
 
 		if (database.password_count && options.regen_lost_salts)
 			build_fake_salts_for_regen_lost(&database);
+
+		if (john_main_process && database.password_count < total) {
+			int count = total - database.password_count;
+			printf("Cracked %d password hash%s%s%s%s, use \"--show\"\n",
+			    count, count != 1 ? "es" : "",
+			    loaded_extra_pots ? "" : (count != 1 ? " (are in " : " (is in "),
+			    loaded_extra_pots ? "" : path_expand(options.activepot),
+			    loaded_extra_pots ? "" : ")");
+		}
 
 		if (!database.password_count) {
 			log_discard();
@@ -1253,24 +1263,21 @@ static void john_load(void)
 		for ( ; i < FMT_TUNABLE_COSTS &&
 			      database.format->methods.tunable_cost_value[i] != NULL; i++) {
 			if (database.min_cost[i] < database.max_cost[i]) {
-				log_event("Loaded hashes with cost %d (%s)"
-				          " varying from %u to %u",
-				          i+1, database.format->params.tunable_cost_name[i],
+				const char *loaded = database.password_count < total ? "Remaining" : "Loaded";
+				log_event("%s hashes with cost %d (%s) varying from %u to %u",
+				          loaded, i+1, database.format->params.tunable_cost_name[i],
 				          database.min_cost[i], database.max_cost[i]);
-					printf("Loaded hashes with cost %d (%s)"
-					       " varying from %u to %u\n",
-					       i+1, database.format->params.tunable_cost_name[i],
-					        database.min_cost[i], database.max_cost[i]);
+				printf("%s hashes with cost %d (%s) varying from %u to %u\n",
+				       loaded, i+1, database.format->params.tunable_cost_name[i],
+				       database.min_cost[i], database.max_cost[i]);
 			}
 			else {	// if (database.min_cost[i] == database.max_cost[i]) {
-				log_event("Cost %d (%s) is %u for all loaded hashes",
-				          i+1, database.format->params.tunable_cost_name[i],
-				          database.min_cost[i]);
+				const char *loaded = database.password_count < total ? "remaining" : "loaded";
+				log_event("Cost %d (%s) is %u for all %s hashes",
+				          i+1, database.format->params.tunable_cost_name[i], database.min_cost[i], loaded);
 				if (options.verbosity >= VERB_DEFAULT)
-				printf("Cost %d (%s) is %u for all loaded "
-				       "hashes\n", i+1,
-				       database.format->params.tunable_cost_name[i],
-				       database.min_cost[i]);
+				printf("Cost %d (%s) is %u for all %s hashes\n",
+				       i+1, database.format->params.tunable_cost_name[i], database.min_cost[i], loaded);
 			}
 		}
 
@@ -1565,6 +1572,7 @@ static void john_init(char *name, int argc, char **argv)
 	if (!(options.flags & FLG_STDOUT))
 		john_register_all(); /* maybe restricted to one format by options */
 	common_init();
+	sig_preinit();
 	sig_init();
 
 	if (!make_check && !(options.flags & (FLG_SHOW_CHK | FLG_STDOUT))) {
@@ -1966,7 +1974,6 @@ int main(int argc, char **argv)
 {
 	char *name;
 
-	sig_preinit(); /* Mitigate race conditions */
 #ifdef __DJGPP__
 	if (--argc <= 0) return 1;
 	if ((name = strrchr(argv[0], '/')))

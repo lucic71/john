@@ -248,7 +248,7 @@ static struct opt_entry opt_list[] = {
 
 #ifdef HAVE_FUZZ
 #define FUZZ_USAGE \
-"--fuzz[=DICTFILE]          Fuzz formats' prepare(), valid() and split()\n" \
+"--fuzz[=DICTFILE|LIMIT]    Fuzz formats' prepare(), valid() and split()\n" \
 "--fuzz-dump[=FROM,TO]      Dump the fuzzed hashes between FROM and TO to file\n" \
 "                           pwfile.format\n"
 #else
@@ -257,7 +257,7 @@ static struct opt_entry opt_list[] = {
 
 #define JOHN_BANNER	  \
 "John the Ripper " JTR_GIT_VERSION _MP_VERSION DEBUG_STRING ASAN_STRING UBSAN_STRING " [" JOHN_BLD "]\n" \
-"Copyright (c) 1996-2022 by " JOHN_COPYRIGHT "\n" \
+"Copyright (c) 1996-2023 by " JOHN_COPYRIGHT "\n" \
 "Homepage: https://www.openwall.com/john/\n" \
 "\n" \
 "Usage: %s [OPTIONS] [PASSWORD-FILES]\n\n"
